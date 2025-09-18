@@ -1,0 +1,162 @@
+---
+title: "NFL Weekly Win Probabilities"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: false
+    df_print: paged
+    theme: readable
+params:
+  # You can override these at render time; if NULL, we’ll read config/params.yml
+  season: !r NULL
+  week: !r NULL
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, error = FALSE)
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(lubridate)
+  library(yaml)
+  library(gt)
+  library(scales)
+  library(arrow)
+})
+
+# --- Robust project root detection ---
+if (!requireNamespace("rprojroot", quietly = TRUE)) install.packages("rprojroot")
+
+# Find a plausible project root by common markers: RStudio project file OR "R" dir OR .git
+proj_root <- rprojroot::find_root(
+  rprojroot::is_rstudio_project | rprojroot::has_file("NFL-Predictor.Rproj") |
+    rprojroot::has_dir("R") | rprojroot::has_dir(".git")
+)
+
+# Ensure knitting happens as if from project root
+knitr::opts_knit$set(root.dir = proj_root)
+setwd(proj_root)
+
+# --- Diagnostics (prints to knit log, helpful if paths are wrong) ---
+cat("Project root detected as:", proj_root, "\n")
+cat("Does R/utils_io.R exist? ", file.exists(file.path(proj_root, "R", "utils_io.R")), "\n")
+cat("Does R/predict_upcoming.R exist? ", file.exists(file.path(proj_root, "R", "predict_upcoming.R")), "\n")
+
+# --- Source project files with absolute paths ---
+source(file.path(proj_root, "R", "utils_io.R"))
+source(file.path(proj_root, "R", "predict_upcoming.R"))
+
+paths      <- read_paths()
+params_cfg <- read_params()
+
+# Use Rmd YAML params if provided; otherwise fall back to config/params.yml
+season <- if (is.null(params$season)) params_cfg$season_current else params$season
+week   <- if (is.null(params$week))   params_cfg$week_cutoff     else params$week
+
+fit_path  <- file.path(paths$models_dir, "fit_lr.rds")
+feat_info <- file.path(paths$models_dir, "feature_info.json")
+feats_cur <- file.path(paths$data_processed, "features_current.parquet")
+
+# More diagnostics
+cat("fit_path exists? ", file.exists(fit_path), "\n")
+cat("feature_info exists? ", file.exists(feat_info), "\n")
+cat("features_current exists? ", file.exists(feats_cur), "\n")
+
+stopifnot(file.exists(fit_path), file.exists(feat_info), file.exists(feats_cur))
+
+fit <- readRDS(fit_path)
+
+```
+## Slate
+
+**Season:** `r season`
+**Week:** `r week`
+
+```{r build-preds, echo=FALSE}
+
+preds <- predict_upcoming_games(
+  fit = fit,
+  season = season,
+  target_week = week,
+  features_current_path = feats_cur,
+  feature_info_path     = feat_info
+)
+
+# Helper: convert prob to American odds
+american_odds <- function(p) {
+  if (is.na(p)) return(NA_character_)
+  if (p <= 0 || p >= 1) return(NA_character_)
+  if (p > 0.5) {
+    ml <- - (p / (1 - p)) * 100
+  } else {
+    ml <- ((1 - p) / p) * 100
+  }
+  sprintf("%+d", round(ml))
+}
+
+# Format predictions for table
+preds_fmt <- preds %>%
+  mutate(
+    date    = format(game_day, "%a %b %d"),
+    matchup = paste0(away_team, " @ ", home_team),
+    prob    = percent(home_win_prob, accuracy = 0.1),
+    ml      = vapply(home_win_prob, american_odds, character(1))
+  ) %>%
+  arrange(week, game_day, matchup) %>%
+  select(date, matchup, home_win_prob, prob, ml)
+
+```
+
+## Probabilities (Home Team)
+
+```{r table, echo=FALSE}
+
+gt_tbl <- preds_fmt %>%
+  gt() %>%
+  cols_label(
+    date = "Date",
+    matchup = "Matchup",
+    home_win_prob = "Home Win (num)",
+    prob = "Home Win (pct)",
+    ml = "Implied ML"
+  ) %>%
+  fmt_number(columns = home_win_prob, decimals = 3) %>%
+  data_color(
+    columns = home_win_prob,
+    colors = scales::col_numeric(
+      palette = c("#d73027","#fee08b","#1a9850"),  # red → yellow → green
+      domain = c(0, 1)
+    )
+  ) %>%
+  tab_options(table.font.size = px(14)) %>%
+  tab_header(
+    title = md("**Weekly Win Probabilities**"),
+    subtitle = md(paste0("Season **", season, "** — Week **", week, "**"))
+  ) %>%
+  cols_width(
+    date ~ px(110),
+    matchup ~ px(250),
+    home_win_prob ~ px(130),
+    prob ~ px(130),
+    ml ~ px(100)
+  )
+
+gt_tbl
+
+```
+## Top Confidence Picks
+
+```{r top-picks, echo=FALSE}
+
+preds_fmt %>%
+  arrange(desc(home_win_prob)) %>%
+  slice_head(n = 5) %>%
+  gt() %>%
+  cols_label(
+    date = "Date",
+    matchup = "Matchup",
+    home_win_prob = "Home Win (num)",
+    prob = "Home Win (pct)",
+    ml = "Implied ML"
+  ) %>%
+  fmt_number(columns = home_win_prob, decimals = 3)

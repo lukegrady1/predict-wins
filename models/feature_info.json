@@ -1,0 +1,4 @@
+{
+  "formula": ["win ~ home_epa_per_play + away_epa_per_play + home_qb_epa + away_qb_epa + ", "    home_third_down_pct + away_third_down_pct + home_scoring_plays_per_game + ", "    away_scoring_plays_per_game + home_turnovers_per_game + away_turnovers_per_game + ", "    home_win_pct + away_win_pct + home_home_win_pct + away_home_win_pct + ", "    home_away_win_pct + away_away_win_pct + home_rest_days + ", "    away_rest_days"],
+  "features": ["home_epa_per_play", "away_epa_per_play", "home_qb_epa", "away_qb_epa", "home_third_down_pct", "away_third_down_pct", "home_scoring_plays_per_game", "away_scoring_plays_per_game", "home_turnovers_per_game", "away_turnovers_per_game", "home_win_pct", "away_win_pct", "home_home_win_pct", "away_home_win_pct", "home_away_win_pct", "away_away_win_pct", "home_rest_days", "away_rest_days"]
+}

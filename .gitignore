@@ -1,0 +1,22 @@
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# renv
+renv/library/
+renv/staging/
+renv/cache/
+renv/profiles/
+
+# data caches (keep processed small files if you want)
+data-raw/
+data/*.parquet
+data/*.feather
+data/*.qs
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+*.swp

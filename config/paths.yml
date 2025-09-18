@@ -1,0 +1,7 @@
+# Centralized paths so scripts don't hard-code directories
+data_raw: "data-raw"
+data_processed: "data"
+data_pbp: "data-raw/pbp"
+data_schedules: "data-raw/schedules"
+models_dir: "models"
+reports_dir: "reports"

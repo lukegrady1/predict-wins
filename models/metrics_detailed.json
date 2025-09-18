@@ -1,0 +1,14 @@
+[
+  {
+    ".metric": "accuracy",
+    ".estimator": "binary",
+    ".estimate": 0.7644,
+    "type": "accuracy"
+  },
+  {
+    ".metric": "roc_auc",
+    ".estimator": "binary",
+    ".estimate": 0.1579,
+    "type": "roc_auc"
+  }
+]

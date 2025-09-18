@@ -1,0 +1,10 @@
+# Project parameters you can tweak anytime
+seasons_train: [2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
+season_current: 2025
+
+# Build features through this week (exclusive) when making "current" features
+# e.g., if week_cutoff = 3, we use data from weeks < 3 and then predict week >= 3
+week_cutoff: 3
+
+# (Optional) enable Elo later; we’ll add code in a later step
+include_elo: false
