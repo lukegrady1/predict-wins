@@ -20,20 +20,26 @@ join_side_features <- function(game_idx, features_tw, side = c("home", "away")) 
   prefix  <- paste0(side, "_")
   
   # Build a programmatic named 'by' vector: names = LHS (game_idx), values = RHS (features_tw)
-  by_keys <- c(season = "season", week = "week", game_id = "game_id")
+  # For prediction-time joins, don't join on game_id (different games)
+  # Only join on season, week, and team
+  by_keys <- c(season = "season", week = "week")
   by_keys[[key_col]] <- "team"  # e.g., by_keys["home_team"] = "team"
-  
-  df <- dplyr::left_join(game_idx, features_tw, by = by_keys)
-  
+
+  df <- dplyr::left_join(game_idx, features_tw, by = by_keys, suffix = c("", "_from_features"))
+
   # Keep schedule keys unprefixed; prefix everything else from the features side
   keep_keys <- c(
     "season","week","game_id","gameday","weekday","gametime",
     "home_team","away_team","location","roof","surface"
   )
   value_cols <- setdiff(names(df), keep_keys)
-  
+
+  # Clean up any duplicated columns from the suffix
+  df <- df %>%
+    select(-any_of(paste0(keep_keys, "_from_features")))
+
   df %>%
-    dplyr::rename_with(~ paste0(prefix, .x), dplyr::all_of(value_cols))
+    dplyr::rename_with(~ paste0(prefix, .x), dplyr::all_of(intersect(value_cols, names(.))))
 }
 
 # --- Build a single model frame (game-level) from features + schedule ----------
@@ -53,8 +59,17 @@ build_model_frame <- function(sched, features_tw) {
     ) %>%
     inner_join(
       away_side %>% select(season, week, game_id, starts_with("away_")),
-      by = c("season","week","game_id")
+      by = c("season","week","game_id"),
+      suffix = c("", "_from_away")  # Avoid .x/.y suffixes
     )
+
+  # Clean up any duplicate team columns that might have been created
+  if ("home_team_from_away" %in% names(mf)) {
+    mf <- mf %>% select(-home_team_from_away)
+  }
+  if ("away_team_from_away" %in% names(mf)) {
+    mf <- mf %>% select(-away_team_from_away)
+  }
   
   # Target derived safely; no fragile opponent check
   mf <- mf %>%

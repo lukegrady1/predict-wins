@@ -1,6 +1,7 @@
 # R/features_build.R
 suppressPackageStartupMessages({
   library(tidyverse)
+  library(tidyr)
   library(lubridate)
   library(janitor)
 })
@@ -207,10 +208,78 @@ attach_qb_to_features <- function(features_tw, sched) {
 }
 
 # =============================================================================
+# STEP 4: Previous season carry-over features (avoid leakage)
+# =============================================================================
+
+# Compute final season stats for carry-over to next season
+compute_previous_season_stats <- function(features_tw) {
+  features_tw %>%
+    filter(!is.na(win), !is.na(point_diff)) %>%
+    group_by(season, team) %>%
+    summarise(
+      # Final season record
+      prev_season_wins = sum(win, na.rm = TRUE),
+      prev_season_games = n(),
+      prev_season_win_pct = mean(win, na.rm = TRUE),
+
+      # Final season offensive stats
+      prev_season_avg_points = mean(points_for, na.rm = TRUE),
+      prev_season_avg_yards_per_play = mean(yards_per_play, na.rm = TRUE),
+      prev_season_avg_success_rate = mean(success_rate, na.rm = TRUE),
+      prev_season_avg_pass_pct = mean(pass_pct, na.rm = TRUE),
+
+      # Final season defensive stats (points allowed)
+      prev_season_avg_points_allowed = mean(points_against, na.rm = TRUE),
+      prev_season_avg_point_diff = mean(point_diff, na.rm = TRUE),
+
+      # Season strength indicators
+      prev_season_avg_opp_win_pct = mean(opp_win_pct_pre, na.rm = TRUE),
+
+      .groups = "drop"
+    ) %>%
+    # Shift to next season for carry-over
+    mutate(season = season + 1) %>%
+    # Rename with prev_ prefix for clarity
+    rename_with(~ paste0("prev_", .x), .cols = -c(season, team))
+}
+
+# Attach previous season stats to current season features
+attach_previous_season_stats <- function(features_tw, all_historical_features = NULL) {
+  # If no historical features provided or empty, return features with zero-filled prev_ columns
+  if (is.null(all_historical_features) || nrow(all_historical_features) == 0) {
+    # Create dummy previous season stats filled with zeros
+    unique_teams <- unique(features_tw$team)
+    unique_seasons <- unique(features_tw$season)
+
+    prev_stats <- tidyr::expand_grid(season = unique_seasons, team = unique_teams) %>%
+      mutate(
+        prev_prev_season_wins = 0,
+        prev_prev_season_games = 0,
+        prev_prev_season_win_pct = 0,
+        prev_prev_season_avg_points = 0,
+        prev_prev_season_avg_yards_per_play = 0,
+        prev_prev_season_avg_success_rate = 0,
+        prev_prev_season_avg_pass_pct = 0,
+        prev_prev_season_avg_points_allowed = 0,
+        prev_prev_season_avg_point_diff = 0,
+        prev_prev_season_avg_opp_win_pct = 0
+      )
+  } else {
+    # Use provided historical features to compute previous season stats
+    prev_stats <- compute_previous_season_stats(all_historical_features)
+  }
+
+  features_tw %>%
+    left_join(prev_stats, by = c("season", "team")) %>%
+    # Fill NA for teams' first seasons in dataset
+    mutate(across(starts_with("prev_"), ~ coalesce(.x, 0)))
+}
+
+# =============================================================================
 # Orchestrators used by scripts/02_build_features.R
 # =============================================================================
 
-build_features_team_week <- function(pbp, sched) {
+build_features_team_week <- function(pbp, sched, all_historical_features = NULL) {
   base_team_week <- build_base_team_week(pbp)
 
   base_team_week %>%
@@ -218,13 +287,15 @@ build_features_team_week <- function(pbp, sched) {
     attach_sos_to_features(sched = sched, team_game_summaries = base_team_week) %>%
     # Step 3: QB features
     attach_qb_to_features(sched = sched) %>%
+    # Step 4: Previous season carry-over features (no leakage)
+    attach_previous_season_stats(all_historical_features = all_historical_features) %>%
     arrange(season, week, team)
 }
 
 # Returns REG-season features for one season (as expected by 02_build_features.R)
-build_training_features_one_season <- function(sched, pbp) {
+build_training_features_one_season <- function(sched, pbp, all_historical_features = NULL) {
   sched_reg <- sched %>% filter(game_type == "REG")
-  feats <- build_features_team_week(pbp, sched_reg)
+  feats <- build_features_team_week(pbp, sched_reg, all_historical_features)
 
   reg_keys <- build_team_week_map(sched_reg) %>%
     select(season, week, team) %>%
@@ -235,10 +306,11 @@ build_training_features_one_season <- function(sched, pbp) {
 }
 
 # Current-season snapshot through week_cutoff - 1 (REG only)
-build_current_features_through_week <- function(sched, pbp, week_cutoff) {
+build_current_features_through_week <- function(sched, pbp, week_cutoff, all_historical_features = NULL) {
   sched_reg <- sched %>% filter(game_type == "REG")
 
   if (!is.numeric(week_cutoff) || week_cutoff <= 1 || nrow(pbp) == 0) {
+    # Return empty tibble with all expected columns including prev_ features
     return(tibble(
       season          = integer(),
       week            = integer(),
@@ -260,10 +332,21 @@ build_current_features_through_week <- function(sched, pbp, week_cutoff) {
       opp_pd_avg_pre  = numeric(),
       qb_id           = character(),
       qb_name         = character(),
-      qb_change       = integer()
+      qb_change       = integer(),
+      # Previous season features
+      prev_prev_season_wins = numeric(),
+      prev_prev_season_games = numeric(),
+      prev_prev_season_win_pct = numeric(),
+      prev_prev_season_avg_points = numeric(),
+      prev_prev_season_avg_yards_per_play = numeric(),
+      prev_prev_season_avg_success_rate = numeric(),
+      prev_prev_season_avg_pass_pct = numeric(),
+      prev_prev_season_avg_points_allowed = numeric(),
+      prev_prev_season_avg_point_diff = numeric(),
+      prev_prev_season_avg_opp_win_pct = numeric()
     ))
   }
 
-  build_features_team_week(pbp, sched_reg) %>%
+  build_features_team_week(pbp, sched_reg, all_historical_features) %>%
     filter(week < week_cutoff)
 }
